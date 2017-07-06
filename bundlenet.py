@@ -119,7 +119,7 @@ rundir = "/home/arokem/bundlenet/run/"
 
 
 class LossHistory(keras.callbacks.Callback):
-    def __init__(self, directory, descript, augment):
+    def __init__(self, directory, descript, augment=0):
         self.d = directory
         self.descript = descript
         self.augment = augment
