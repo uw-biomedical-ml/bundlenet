@@ -172,13 +172,10 @@ def generate_validation():
 
 
 history = LossHistory(rundir, "model")
-model.fit_generator(generate_samples(), 
-                    nb_worker=1, 
-                    samples_per_epoch=1,
-                    validation_data=generate_validation(), 
-                    nb_epoch=1, 
-                    verbose=1, 
-                    callbacks=[history, checkpoint])
+
+model.fit_generator(generate_samples(), validation_data=generate_validation(), 
+                    validation_steps=1, verbose=1, callbacks=[history, checkpoint], 
+                    steps_per_epoch=1, epochs=1, workers=1)
 
 
 
