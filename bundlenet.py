@@ -1,16 +1,22 @@
+import os
+import sys
+import os.path as op
+from glob import glob
+
+
 import keras
-from keras.datasets import mnist
+from keras.utils import plot_model
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, Flatten
 from keras.layers import (Convolution2D, MaxPooling2D, Convolution3D,
                           MaxPooling3D)
+
+from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
+
 from keras import backend as K
 
 
 import numpy as np
-
-import os.path as op
-from glob import glob
 
 import dipy.data as dpd
 import nibabel as nib
@@ -47,9 +53,6 @@ epochs = 12
 
 # input image dimensions
 img_x, img_y, img_z = t1_warped_img.shape
-# the data, shuffled and split between train and test sets
-(x_train, y_train), (x_test, y_test) = mnist.load_data()
-
 
 import sklearn.model_selection as ms 
 
@@ -109,22 +112,15 @@ model.compile(loss=keras.losses.categorical_crossentropy,
               metrics=['accuracy'])
 
 
-def generate_samples():
-    while 1:
-        for ii in range(bundle_train_arr.shape[0]):
-            yield bundle_train_arr[ii:ii+1], one_hot_train_arr[ii:ii+1]
+descript = "description-" 
 
-
-def generate_validation():
-    while 1:
-        for ii in range(bundle_test_arr.shape[0]):
-            yield bundle_test_arr[ii:ii+1], one_hot_test_arr[ii:ii+1]
-
+datadir = "/home/arokem/bundlenet/data/"
+rundir = "/home/arokem/bundlenet/run/"
 
 
 class LossHistory(keras.callbacks.Callback):
     def __init__(self, directory, descript, augment):
-        self.director = directory
+        self.d = directory
         self.descript = descript
         self.augment = augment
 
@@ -148,18 +144,41 @@ class LossHistory(keras.callbacks.Callback):
                         fout.write("%s\t%d\ttrain\t%d\t%s\t%.6f\n" % (self.descript, self.augment, self.lastiter, metric, logs.get(metric)))
 
 
+#rundir += descript
+if not op.exists(rundir):
+    os.mkdir("%s/"  % (rundir))
+if not op.exists("%s/weights"  % (rundir)):
+    os.mkdir("%s/weights"  % (rundir))
 
 
+print(model.summary())
+with open("%s/model.yaml" % (rundir), "w") as fout:
+    fout.write(model.to_yaml())
+
+plot_model(model, to_file='model.png')
+
+checkpoint = ModelCheckpoint(rundir + 'check', save_best_only=True, mode='max', monitor='val_acc')
+
+def generate_samples():
+    while 1:
+        for ii in range(bundle_train_arr.shape[0]):
+            yield bundle_train_arr[ii:ii+1], one_hot_train_arr[ii:ii+1]
+
+
+def generate_validation():
+    while 1:
+        for ii in range(bundle_test_arr.shape[0]):
+            yield bundle_test_arr[ii:ii+1], one_hot_test_arr[ii:ii+1]
+
+
+history = LossHistory(rundir, "model")
 model.fit_generator(generate_samples(), 
-                    steps_per_epoch=1,
-                    epochs=1,
-                    verbose=1,
+                    nb_worker=1, 
+                    samples_per_epoch=1,
                     validation_data=generate_validation(), 
-                    validation_steps=1)
-
-score = model.evaluate(x_test, y_test, verbose=0)
-print('Test loss:', score[0])
-print('Test accuracy:', score[1])
+                    nb_epoch=1, 
+                    verbose=1, 
+                    callbacks=[history, checkpoint])
 
 
 
