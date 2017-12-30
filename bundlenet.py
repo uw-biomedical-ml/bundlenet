@@ -10,6 +10,7 @@ from glob import glob
 import os.path as op
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 from nibabel.streamlines import load as load_trk
 import nibabel as nib
@@ -111,4 +112,19 @@ def plot_accuracy(training):
     ax.set_ylabel("Accuracy (% correct)")
     fig.suptitle('Training and validation accuracy')
     plt.legend()
+    return fig
+
+
+def plot_streamlines(streamlines, color=None):
+
+    fig = plt.figure()
+    ax = fig.gca(projection='3d')
+    if color is not None:
+        ax.plot(sl[:, 0], sl[:, 1], sl[:, 2], c=color)
+    else:
+        ax.plot(sl[:, 0], sl[:, 1], sl[:, 2], c=color)
+
+    ax.view_init(elev=0, azim=0)
+    plt.axis("off")
+
     return fig
