@@ -18,9 +18,12 @@ import nibabel as nib
 import dipy.tracking.streamline as dts
 import dipy.tracking.utils as dtu
 from skimage.transform import resize
-from scipy.ndimage.morphology import binary_dilation
-from scipy.ndimage.morphology import generate_binary_structure
+import scipy.ndimage.morphology as morph
 from scipy.ndimage import gaussian_filter
+from scipy.signal import fftconvolve
+from numba import jit
+import dask.array as da
+from dask import delayed
 import time
 
 
@@ -33,125 +36,41 @@ def read_sl(fname):
                                    np.eye(4), tgram.affine))
     return sl
 
-def binary_dilation(input, structure=None, iterations=1, mask=None,
-                    output=None, border_value=0, origin=0,
-                    brute_force=False):
-    """
-    Multi-dimensional binary dilation with the given structuring element.
-    Parameters
-    ----------
-    input : array_like
-        Binary array_like to be dilated. Non-zero (True) elements form
-        the subset to be dilated.
-    structure : array_like, optional
-        Structuring element used for the dilation. Non-zero elements are
-        considered True. If no structuring element is provided an element
-        is generated with a square connectivity equal to one.
-    iterations : {int, float}, optional
-        The dilation is repeated `iterations` times (one, by default).
-        If iterations is less than 1, the dilation is repeated until the
-        result does not change anymore.
-    mask : array_like, optional
-        If a mask is given, only those elements with a True value at
-        the corresponding mask element are modified at each iteration.
-    output : ndarray, optional
-        Array of the same shape as input, into which the output is placed.
-        By default, a new array is created.
-    border_value : int (cast to 0 or 1), optional
-        Value at the border in the output array.
-    origin : int or tuple of ints, optional
-        Placement of the filter, by default 0.
-    brute_force : boolean, optional
-        Memory condition: if False, only the pixels whose value was changed in
-        the last iteration are tracked as candidates to be updated (dilated)
-        in the current iteration; if True all pixels are considered as
-        candidates for dilation, regardless of what happened in the previous
-        iteration. False by default.
-    Returns
-    -------
-    binary_dilation : ndarray of bools
-        Dilation of the input by the structuring element.
-    See also
-    --------
-    grey_dilation, binary_erosion, binary_closing, binary_opening,
-    generate_binary_structure
-    Notes
-    -----
-    Dilation [1]_ is a mathematical morphology operation [2]_ that uses a
-    structuring element for expanding the shapes in an image. The binary
-    dilation of an image by a structuring element is the locus of the points
-    covered by the structuring element, when its center lies within the
-    non-zero points of the image.
-    References
-    ----------
-    .. [1] https://en.wikipedia.org/wiki/Dilation_%28morphology%29
-    .. [2] https://en.wikipedia.org/wiki/Mathematical_morphology
-    Examples
-    --------
-    >>> from scipy import ndimage
-    >>> a = np.zeros((5, 5))
-    >>> a[2, 2] = 1
-    >>> a
-    array([[ 0.,  0.,  0.,  0.,  0.],
-           [ 0.,  0.,  0.,  0.,  0.],
-           [ 0.,  0.,  1.,  0.,  0.],
-           [ 0.,  0.,  0.,  0.,  0.],
-           [ 0.,  0.,  0.,  0.,  0.]])
-    >>> ndimage.binary_dilation(a)
-    array([[False, False, False, False, False],
-           [False, False,  True, False, False],
-           [False,  True,  True,  True, False],
-           [False, False,  True, False, False],
-           [False, False, False, False, False]], dtype=bool)
-    >>> ndimage.binary_dilation(a).astype(a.dtype)
-    array([[ 0.,  0.,  0.,  0.,  0.],
-           [ 0.,  0.,  1.,  0.,  0.],
-           [ 0.,  1.,  1.,  1.,  0.],
-           [ 0.,  0.,  1.,  0.,  0.],
-           [ 0.,  0.,  0.,  0.,  0.]])
-    >>> # 3x3 structuring element with connectivity 1, used by default
-    >>> struct1 = ndimage.generate_binary_structure(2, 1)
-    >>> struct1
-    array([[False,  True, False],
-           [ True,  True,  True],
-           [False,  True, False]], dtype=bool)
-    >>> # 3x3 structuring element with connectivity 2
-    >>> struct2 = ndimage.generate_binary_structure(2, 2)
-    >>> struct2
-    array([[ True,  True,  True],
-           [ True,  True,  True],
-           [ True,  True,  True]], dtype=bool)
-    >>> ndimage.binary_dilation(a, structure=struct1).astype(a.dtype)
-    array([[ 0.,  0.,  0.,  0.,  0.],
-           [ 0.,  0.,  1.,  0.,  0.],
-           [ 0.,  1.,  1.,  1.,  0.],
-           [ 0.,  0.,  1.,  0.,  0.],
-           [ 0.,  0.,  0.,  0.,  0.]])
-    >>> ndimage.binary_dilation(a, structure=struct2).astype(a.dtype)
-    array([[ 0.,  0.,  0.,  0.,  0.],
-           [ 0.,  1.,  1.,  1.,  0.],
-           [ 0.,  1.,  1.,  1.,  0.],
-           [ 0.,  1.,  1.,  1.,  0.],
-           [ 0.,  0.,  0.,  0.,  0.]])
-    >>> ndimage.binary_dilation(a, structure=struct1,\\
-    ... iterations=2).astype(a.dtype)
-    array([[ 0.,  0.,  1.,  0.,  0.],
-           [ 0.,  1.,  1.,  1.,  0.],
-           [ 1.,  1.,  1.,  1.,  1.],
-           [ 0.,  1.,  1.,  1.,  0.],
-           [ 0.,  0.,  1.,  0.,  0.]])
-    """
+def binary_dilation(input, structure, iterations, origin):
+    invert =1
+    mask = None
+    output = np.zeros(input.shape,bool)
+    border_value = 0
     
-    for ii in range(len(origin)):
-        origin[ii] = -origin[ii]
-        if not structure.shape[ii] & 1:
-            origin[ii] -= 1
+    if iterations == 1:
+        _nd_image.binary_erosion(input, structure, mask, output,
+                                 border_value, origin, invert, True, 0)
+        return output
+    else:
+        changed, coordinate_list = morph._nd_image.binary_erosion(
+            input, structure, mask, output,
+            border_value, origin, invert, True, 1)
+        structure = structure[tuple([slice(None, None, -1)] *
+                                    structure.ndim)]
+        for ii in range(len(origin)):
+            origin[ii] = -origin[ii]
+            if not structure.shape[ii] & 1:
+                origin[ii] -= 1
+        morph._nd_image.binary_erosion2(output, structure, mask, iterations - 1,
+                                  origin, invert, coordinate_list)
+        return output
+    
+#a decorator    
+@jit
+def sparse_dilation(a):
+    pos = np.where(a)
 
-    return _binary_erosion(input, structure, iterations, mask,
-                           output, border_value, origin, 1, brute_force)
+    for p in zip(pos[0], pos[1]):
+        a[p[0] - 1 : p[0] + 2, p[1] - 1:p[1] + 2] = 1
+
+    return a 
     
-    
-def reduce_sl(sl, vol_shape, dilation_iter=5, size=100):
+def reduce_sl(sl, vol_shape, structure, origin, dilation_iter=5, size=100):
     """
     Reduces a 3D streamline to a binarized 100 x 100 image.
     """ 
@@ -161,7 +80,8 @@ def reduce_sl(sl, vol_shape, dilation_iter=5, size=100):
     vol[sl[0], sl[1], sl[2]] = 1
     # emphasize it a bit:
     tic = time.clock()
-    vol = binary_dilation(vol, iterations=dilation_iter)
+    #vol = binary_dilation(vol, structure, dilation_iter, origin)
+    #vol = morph.binary_dilation(vol, iterations=dilation_iter)
     #vol = gaussian_filter(vol, sigma=(5, 5, 5), order=0)
     toc = time.clock()
     #print("time dilation" + str(toc - tic))
@@ -173,10 +93,14 @@ def reduce_sl(sl, vol_shape, dilation_iter=5, size=100):
     p1 = resize(np.max(vol, 1),(vol_shape[0], vol_shape[0]))
     p2 = np.max(vol, 2) 
     projected = np.concatenate((p0,p1,p2))
+    #projected = morph.binary_dilation(projected, iterations=dilation_iter)
+    #kernel = np.ones((3,3))
+    #projected = fftconvolve(projected,kernel)
     #projected = np.concatenate([np.max(vol, dim) for dim in range(len(vol.shape))])
     tic = time.clock()
     projected = resize(projected, (size, size, 1)) #expects 3-d, like rgb
-    #projected = binary_dilation(projected, iterations=dilation_iter)
+    projected = sparse_dilation(projected)
+    #projected = morph.binary_dilation(projected, iterations=dilation_iter)
     toc = time.clock()
     #print("time 2nd resize" + str(toc - tic))
     return projected
@@ -189,13 +113,20 @@ def partition_data(bundle_files, vol_shape, take_n_bundles,
 
 
     """
-    data_train = np.zeros((np.int(np.round(take_n_bundles * take_n_sl * 0.6)),
-                           size, size, 1), dtype='float32')
-    data_valid = np.zeros((np.int(np.round(take_n_bundles * take_n_sl * 0.2)),
-                           size, size, 1), dtype='float32')
-    data_test = np.zeros((np.int(np.round(take_n_bundles * take_n_sl * 0.2)),
-                          size, size, 1), dtype='float32')
+#     data_train = np.zeros((np.int(np.round(take_n_bundles * take_n_sl * 0.6)),
+#                            size, size, 1), dtype='float32')
+#     data_valid = np.zeros((np.int(np.round(take_n_bundles * take_n_sl * 0.2)),
+#                            size, size, 1), dtype='float32')
+#     data_test = np.zeros((np.int(np.round(take_n_bundles * take_n_sl * 0.2)),
+#                           size, size, 1), dtype='float32')
+#     data_train = da.from_array(data_train,chunks=data_train.shape)
+#     data_valid = da.from_array(data_valid,chunks=data_valid.shape)
+#     data_test = da.from_array(data_test,chunks=data_test.shape)
 
+    data_train = []
+    data_valid = []
+    data_test = []
+    
     labels_train = np.zeros(np.int(np.round(take_n_bundles * take_n_sl * 0.6)))
     labels_valid = np.zeros(np.int(np.round(take_n_bundles * take_n_sl * 0.2)))
     labels_test = np.zeros(np.int(np.round(take_n_bundles * take_n_sl * 0.2)))
@@ -207,9 +138,8 @@ def partition_data(bundle_files, vol_shape, take_n_bundles,
     tract_id = 0
     
     #removed from binary_dilation
-    structure = generate_binary_structure(input.ndim, 1)
-    origin = _ni_support._normalize_sequence(origin, input.ndim)
-    structure = numpy.asarray(structure)
+    structure = morph.generate_binary_structure(3, 1)
+    origin = morph._ni_support._normalize_sequence(0, 3)
     structure = structure[tuple([slice(None, None, -1)] *
                                 structure.ndim)]
     
@@ -237,26 +167,29 @@ def partition_data(bundle_files, vol_shape, take_n_bundles,
                       "in %s, track number: %s" %
                       (fname, sl_idx))
                     print("####################")
-            projected = reduce_sl(sl, vol_shape, dilation_iter=dilation_iter,
-                                  size=size)
+            projected = da.from_delayed(delayed(reduce_sl)(sl, vol_shape, structure, origin, dilation_iter,
+                                  size=size),(100,100,1),np.float32)
             if sl_idx < (np.round(take_n_sl * 0.2)):
-                data_test[ii_test] = projected
+                #data_test[ii_test] = projected
+                data_test.append(projected)
                 labels_test[ii_test] = tract_id
                 ii_test += 1
             elif sl_idx < (np.round(take_n_sl * 0.4)):
-                data_valid[ii_valid] = projected
+                #data_valid[ii_valid] = projected
+                data_valid.append(projected)
                 labels_valid[ii_valid] = tract_id
                 ii_valid += 1
             else:
-                data_train[ii_train] = projected
+                #data_train[ii_train] = projected
+                data_train.append(projected)
                 labels_train[ii_train] = tract_id
                 ii_train += 1
             toc = time.clock()
-            #print(toc - tic)
+            #print("time to process 1 streamline " + str(toc - tic))
         toc = time.clock()
         #print(toc - tic)
     toc_t = time.clock()
-    print("total time to process sreamlines " + str(toc_t - tic_t))
+    print("total time to process streamlines " + str(toc_t - tic_t))
     return (data_train, data_valid, data_test, labels_train, labels_valid,
             labels_test)
 
@@ -288,3 +221,4 @@ def plot_streamlines(streamlines, color=None):
     plt.axis("off")
 
     return fig
+
