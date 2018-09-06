@@ -99,8 +99,8 @@ def reduce_sl(sl, vol_shape, structure, origin, dilation_iter=5, size=100):
     #projected = np.concatenate([np.max(vol, dim) for dim in range(len(vol.shape))])
     tic = time.clock()
     projected = resize(projected, (size, size, 1)) #expects 3-d, like rgb
-    projected = sparse_dilation(projected)
-    #projected = morph.binary_dilation(projected, iterations=dilation_iter)
+    #projected = sparse_dilation(projected)
+    projected = morph.binary_dilation(projected, iterations=dilation_iter)
     toc = time.clock()
     #print("time 2nd resize" + str(toc - tic))
     return projected
