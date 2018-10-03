@@ -55,7 +55,7 @@ def partition_testtrain(test_perc, val_perc, streamlines_processed):
         all_streamlines = np.concatenate((all_streamlines,streamlines_processed[i]),axis=0)
         all_labels = np.concatenate((all_labels,i*np.zeros((streamlines_processed[i].shape[0]))))
     data_trainval, data_test, labels_trainval, labels_test = train_test_split(all_streamlines, all_labels, test_size=test_perc, stratify=all_labels)
-    data_train, data_val, labels_train, labels_val = train_test_split(data_trainval, labels_trainval, test_size=val_perc/test_perc, stratify=labels_trainval)
+    data_train, data_val, labels_train, labels_val = train_test_split(data_trainval, labels_trainval, test_size=val_perc/(1-test_perc), stratify=labels_trainval)
     return (data_train, data_test, data_val, labels_train, labels_test, labels_val)
 
 def plot_accuracy(training):
