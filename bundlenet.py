@@ -24,7 +24,7 @@ import seaborn as sns
 def read_sl(fname):
     
     """
-    Reads streamlins from file.
+    Reads streamlines from file.
     """
     tgram = load_trk(fname)
     sl = list(dtu.move_streamlines(tgram.streamlines,
@@ -32,7 +32,12 @@ def read_sl(fname):
     return sl
 
 def process_sl(streamlines_tract,take_n_sl,vol_shape,size):
-    if take_n_sl == -1 :
+    
+    """
+    Takes dask bag of loaded bundles and returns sizexsize MIP image
+    """
+    
+    if take_n_sl == -1 or take_n_sl > len(streamlines_tract):
         take_n_sl = len(streamlines_tract)
     projected_all = np.zeros([take_n_sl,size,size,1])
     np.random.shuffle(streamlines_tract)
@@ -52,6 +57,10 @@ def process_sl(streamlines_tract,take_n_sl,vol_shape,size):
     return projected_all
 
 def partition_testtrain(test_perc, val_perc, streamlines_processed):
+    
+    """
+    Partitions data into test, train, and validation
+    """
     all_streamlines = streamlines_processed[0]
     all_labels = np.zeros((streamlines_processed[0].shape[0]))
     for i in range(1,len(streamlines_processed)):
@@ -61,7 +70,11 @@ def partition_testtrain(test_perc, val_perc, streamlines_processed):
     data_train, data_val, labels_train, labels_val = train_test_split(data_trainval, labels_trainval, test_size=val_perc/(1-test_perc), stratify=labels_trainval)
     return (data_train, data_test, data_val, labels_train, labels_test, labels_val)
 
-def getdata(streamlines_processed):
+def getdatafrombag(streamlines_processed):
+    
+    """
+    Makes an nd.array of all streamlines from dask bag, used when not partitioning
+    """
     all_streamlines = streamlines_processed[0]
     all_labels = np.zeros((streamlines_processed[0].shape[0]))
     for i in range(1,len(streamlines_processed)):
@@ -70,6 +83,11 @@ def getdata(streamlines_processed):
     return (all_streamlines,all_labels)
 
 def plot_accuracy(training):
+    
+    """
+    Plots accuracy stats.
+    """
+    
     accuracy = training.history['acc']
     val_accuracy = training.history['val_acc']
     epochs = range(len(accuracy))
@@ -83,6 +101,11 @@ def plot_accuracy(training):
     return fig
 
 def print_accuarcystats(p_idx,labels_actual_idx):
+    
+    """
+    Prints accuracy stats.
+    """
+    
     print("Percent correct is %s " % np.mean(p_idx == labels_actual_idx))
     kappa = cohen_kappa_score(p_idx, labels_actual_idx)
     print("Kappa is: %s" % kappa)
@@ -90,6 +113,11 @@ def print_accuarcystats(p_idx,labels_actual_idx):
     print("Jaccard is: %s" % jaccard)
 
 def plotconfusionmat(bundle_names,p_idx,labels_actual_idx):
+    
+    """
+    Calculated and plots confusion matrix.
+    """
+    
     labels = np.array(range(min(p_idx),max(p_idx)+1))
     confusion_mat = confusion_matrix(labels_actual_idx,p_idx, labels)
     arr_bundle_names = np.array(bundle_names)
