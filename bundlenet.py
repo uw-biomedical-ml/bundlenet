@@ -31,7 +31,26 @@ def read_sl(fname):
                                    np.eye(4), tgram.affine))
     return sl
 
-def process_sl(streamlines_tract,take_n_sl,vol_shape,size):
+def read_sl_mni(fname):
+    
+    """
+    Reads streamlines from file.
+    """
+    tgram = load_trk(fname)
+    sl = list(dtu.move_streamlines(tgram.streamlines,
+                                   np.eye(4), tgram.affine))
+    sl_mni=[]
+    for i in range(len(sl)):
+        tmp = sl[i]
+        tmp2=np.zeros([len(tmp),3])
+        tmp2[:,0] = tmp[:,0] * -1 + 90
+        tmp2[:,1] = tmp[:,1] + 126
+        tmp2[:,2] = tmp[:,2] + 72
+        sl_mni.append(np.round(tmp2))
+    return sl_mni
+
+
+def process_sl(streamlines_tract,take_n_sl,vol_shape,size,dil_iters):
     
     """
     Takes dask bag of loaded bundles and returns sizexsize MIP image
@@ -39,11 +58,16 @@ def process_sl(streamlines_tract,take_n_sl,vol_shape,size):
     
     if take_n_sl == -1 or take_n_sl > len(streamlines_tract):
         take_n_sl = len(streamlines_tract)
+    else:
+        np.random.shuffle(streamlines_tract)
+    
     projected_all = np.zeros([take_n_sl,size,size,1])
-    np.random.shuffle(streamlines_tract)
+    
     resize_dim = max(vol_shape)
     s1_selected = streamlines_tract[:take_n_sl]
     for sl_idx, sl in enumerate(s1_selected):
+        if sl_idx % 1000 == 0:
+            print(sl_idx)
         vol = np.zeros(vol_shape, dtype=bool)
         sl = np.round(sl).astype(int).T
         vol[sl[0], sl[1], sl[2]] = 1
@@ -51,10 +75,20 @@ def process_sl(streamlines_tract,take_n_sl,vol_shape,size):
         p1 = resize(np.max(vol, 1),(resize_dim,resize_dim))
         p2 = resize(np.max(vol, 2),(resize_dim,resize_dim)) 
         projected = np.concatenate((p0,p1,p2))
-        projected = morph.binary_dilation(projected, iterations=5)
+        projected = morph.binary_dilation(projected, iterations=dil_iters)
         projected = resize(projected, (size, size,1)) #expects 3-d, like rgb
         projected_all[sl_idx,:,:,:]=projected
     return projected_all
+
+def process_slandpredict(streamlines_tract,take_n_sl,vol_shape,size,dil_iters,model):
+    
+    """
+    Takes dask bag of loaded bundles and returns sizexsize MIP image
+    """
+    projected_all = process_slandpredict(streamlines_tract,take_n_sl,vol_shape,size,dil_iters)
+    p_sl = model.predict(projected_all, batch_size=5)
+    return p_sl
+    
 
 def partition_testtrain(test_perc, val_perc, streamlines_processed):
     
@@ -63,7 +97,7 @@ def partition_testtrain(test_perc, val_perc, streamlines_processed):
     """
     all_streamlines = streamlines_processed[0]
     all_labels = np.zeros((streamlines_processed[0].shape[0]))
-    for i in range(1,len(streamlines_processed)):
+    for i in range(0,len(streamlines_processed)):
         all_streamlines = np.concatenate((all_streamlines,streamlines_processed[i]),axis=0)
         all_labels = np.concatenate((all_labels,i*np.ones((streamlines_processed[i].shape[0]))))
     data_trainval, data_test, labels_trainval, labels_test = train_test_split(all_streamlines, all_labels, test_size=test_perc, stratify=all_labels)
