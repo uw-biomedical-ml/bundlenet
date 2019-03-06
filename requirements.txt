@@ -1,5 +1,3 @@
-keras 
-tensorflow 
 dipy 
 matplotlib 
 seaborn 
@@ -7,3 +5,4 @@ scikit-image
 sklearn
 pydot
 numba
+dask[bag]
