@@ -79,7 +79,7 @@ def process_sl(streamlines_tract,take_n_sl,vol_shape,size,dil_iters):
     
     projected_all = np.zeros([take_n_sl,size,size,1])
     
-    resize_dim = max(vol_shape)
+    resize_dim = size #min(vol_shape)
     s1_selected = streamlines_tract[:take_n_sl]
     for sl_idx, sl in enumerate(s1_selected):
         if sl_idx % 1000 == 0:
@@ -91,7 +91,8 @@ def process_sl(streamlines_tract,take_n_sl,vol_shape,size,dil_iters):
         p1 = resize(np.max(vol, 1),(resize_dim,resize_dim))
         p2 = resize(np.max(vol, 2),(resize_dim,resize_dim)) 
         projected = np.concatenate((p0,p1,p2))
-        projected = morph.binary_dilation(projected, iterations=dil_iters)
+        if dil_iters != 0:
+            projected = morph.binary_dilation(projected, iterations=dil_iters)
         projected = resize(projected, (size, size,1)) #expects 3-d, like rgb
         projected_all[sl_idx,:,:,:]=projected
     return projected_all
@@ -166,7 +167,10 @@ def partition_testtrain(test_perc, val_perc, streamlines_processed):
         labels_val = []
     return (data_train, data_test, data_val, labels_train, labels_test, labels_val)
 
-def partition_testtrain_onedirection(test_perc, val_perc, streamlines_processed,dim_proj):
+def partition_testtrain_onedirection(test_perc, val_perc, streamlines_processed, dim_proj):
+    """
+    Partitions data into test, train, and validation with 1 direction MIP images
+    """
     all_streamlines = streamlines_processed[0][dim_proj]
     all_labels = np.zeros((streamlines_processed[0][dim_proj].shape[0]))
     for i in range(1,len(streamlines_processed)):
@@ -187,6 +191,49 @@ def partition_testtrain_onedirection(test_perc, val_perc, streamlines_processed,
         data_val = []
         labels_val = []
     return (data_train, data_test, data_val, labels_train, labels_test, labels_val)
+
+def buildmodel(input_shape, num_classes):
+    model = Sequential()
+    model.add(Conv2D(32, kernel_size=(3, 3),activation='linear',input_shape=input_shape,padding='same'))
+    model.add(LeakyReLU(alpha=0.1))
+    model.add(MaxPooling2D((2, 2),padding='same'))
+    model.add(Dropout(0.25))
+    model.add(Conv2D(64, (3, 3), activation='linear',padding='same'))
+    model.add(LeakyReLU(alpha=0.1))
+    model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
+    model.add(Dropout(0.25))
+    model.add(Conv2D(128, (3, 3), activation='linear',padding='same'))
+    model.add(LeakyReLU(alpha=0.1))                  
+    model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
+    model.add(Dropout(0.25))
+    model.add(Flatten())
+    model.add(Dense(128, activation='linear'))
+    model.add(Dropout(0.25))
+    model.add(LeakyReLU(alpha=0.1))                  
+    model.add(Dense(num_classes, activation='softmax'))
+    return model
+
+def getlabeledstreamlines(map_files):
+    labeled_index = []
+    labels = []
+    for m_idx, m in enumerate(map_files):
+        tmp = np.load(m)
+        labeled_index = np.append(labeled_index,tmp)
+        labels = np.append(labels,m_idx*np.ones([len(tmp),1]))
+    return(labeled_index, labels) 
+    
+def getunlabeledstreamlines(n_sl, labeled_index, n_unlabeled, randomize_sl):
+    ind = range(n_sl)
+    ind = np.delete(ind,labeled_index)
+    if randomize_sl == 1:
+        np.random.shuffle(ind)
+    unlabeled_index = ind[0:n_unlabeled]
+    return(unlabeled_index)
+
+def combinestreamlines(labeled_index, unlabeled_index, labels, streamlines):
+    labels_selected = np.append(labeled_index,(np.max(labeled_index)+1)*np.ones([len(unlabeled_index),1]))
+    streamlines_selected = [streamlines[i] for i in np.int_(np.append(labeled_index, unlabeled_index))]
+    return(labels_selected, streamlines_selected)
 
 def getdatafrombag(streamlines_processed):
     
