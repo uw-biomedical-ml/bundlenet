@@ -33,6 +33,8 @@ from keras.preprocessing.image import ImageDataGenerator
 from dipy.io.streamline import load_trk, save_trk
 from dipy.tracking.streamline import Streamlines
 
+import xgboost as xgb
+
 def read_sl(fname):
     
     """
@@ -231,7 +233,7 @@ def getunlabeledstreamlines(n_sl, labeled_index, n_unlabeled, randomize_sl):
     return(unlabeled_index)
 
 def combinestreamlines(labeled_index, unlabeled_index, labels, streamlines):
-    labels_selected = np.append(labeled_index,(np.max(labeled_index)+1)*np.ones([len(unlabeled_index),1]))
+    labels_selected = np.append(labels,(np.max(labels)+1)*np.ones([len(unlabeled_index),1]))
     streamlines_selected = [streamlines[i] for i in np.int_(np.append(labeled_index, unlabeled_index))]
     return(labels_selected, streamlines_selected)
 
@@ -310,6 +312,23 @@ def plotconfusionmat(bundle_names,p_idx,labels_actual_idx):
             xticklabels=arr_bundle_names[sort_idx], 
             yticklabels=arr_bundle_names[sort_idx], ax=ax)
     fig.set_size_inches([10, 8])
+    
+def run_xgboost(X_train,y_train,X_test,y_test,max_depth,num_class):
+
+#move to bundlenet - leanwithxgboost
+    param = {
+    'max_depth': 10,  # the maximum depth of each tree
+    'eta': 0.3,  # the training step for each iteration
+    'silent': 1,  # logging mode - quiet
+    'objective': 'multi:softprob',  # error evaluation for multiclass training
+    'num_class': 17}  # the number of classes that exist in this datset
+    num_round = 20  # the number of training iterations
+    dtrain = xgb.DMatrix(X_train, label=y_train)
+    dtest = xgb.DMatrix(X_test, label=y_test)
+    bst = xgb.train(param, dtrain, num_round)
+    preds = bst.predict(dtest)
+    p = np.argmax(preds,axis=1)
+    return p
     
 
 def trainmodel(data_train, labels_train, labels_train_o, data_val, labels_val, data_test, labels_test, input_shape, num_classes, batch_size, epochs, data_aug, num_samples): 
