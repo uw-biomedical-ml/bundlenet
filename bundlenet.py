@@ -194,6 +194,38 @@ def partition_testtrain_onedirection(test_perc, val_perc, streamlines_processed,
         labels_val = []
     return (data_train, data_test, data_val, labels_train, labels_test, labels_val)
 
+def buildmodel_specify(input_shape, num_classes, dropout_factor, num_convlayers, num_fulllayers):
+    model = Sequential()
+    model.add(Conv2D(32, kernel_size=(3, 3),activation='relu',input_shape=input_shape,padding='same'))
+    model.add(MaxPooling2D((2, 2),padding='same'))
+    model.add(Dropout(dropout_factor))
+    model.add(Conv2D(64, (3, 3), activation='relu',padding='same'))
+    model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
+    model.add(Dropout(dropout_factor))
+    model.add(Conv2D(128, (3, 3), activation='relu',padding='same'))
+    model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
+    model.add(Dropout(dropout_factor))
+    if num_convlayers > 3:
+        model.add(Conv2D(256, (3, 3), activation='relu',padding='same'))
+        model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
+        model.add(Dropout(dropout_factor))
+    if num_convlayers > 4:
+        model.add(Conv2D(512, (3, 3), activation='relu',padding='same'))
+        model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
+        model.add(Dropout(dropout_factor))
+    model.add(Flatten())
+    model.add(Dense(128, activation='relu'))
+    model.add(Dropout(dropout_factor))
+    if num_fulllayers > 1:
+        model.add(Dense(256, activation='relu'))
+        model.add(Dropout(dropout_factor))
+    model.add(Dense(num_classes, activation='softmax'))
+    
+    model.compile(loss=keras.losses.categorical_crossentropy,
+              optimizer=keras.optimizers.Adam(),
+              metrics=['accuracy'])
+    return model
+
 def buildmodel(input_shape, num_classes):
     model = Sequential()
     model.add(Conv2D(32, kernel_size=(3, 3),activation='linear',input_shape=input_shape,padding='same'))
@@ -213,6 +245,9 @@ def buildmodel(input_shape, num_classes):
     model.add(Dropout(0.25))
     model.add(LeakyReLU(alpha=0.1))                  
     model.add(Dense(num_classes, activation='softmax'))
+    model.compile(loss=keras.losses.categorical_crossentropy,
+              optimizer=keras.optimizers.Adam(),
+              metrics=['accuracy'])
     return model
 
 def getlabeledstreamlines(map_files):
@@ -313,21 +348,34 @@ def plotconfusionmat(bundle_names,p_idx,labels_actual_idx):
             yticklabels=arr_bundle_names[sort_idx], ax=ax)
     fig.set_size_inches([10, 8])
     
-def run_xgboost(X_train,y_train,X_test,y_test,max_depth,num_class):
+def run_xgboost(X_train,y_train,X_test,y_test,max_depth,num_class,thresh):
 
-#move to bundlenet - leanwithxgboost
-    param = {
-    'max_depth': 10,  # the maximum depth of each tree
-    'eta': 0.3,  # the training step for each iteration
-    'silent': 1,  # logging mode - quiet
-    'objective': 'multi:softprob',  # error evaluation for multiclass training
-    'num_class': 17}  # the number of classes that exist in this datset
+    if num_class < 3:
+        obj = 'binary:logistic'
+        param = {
+        'max_depth': max_depth,  # the maximum depth of each tree
+        'eta': 0.3,  # the training step for each iteration
+        'silent': 1,  # logging mode - quiet
+        'objective': obj,  # error evaluation for multiclass training
+        }  # the number of classes that exist in this datset
+
+    else:
+        obj= 'multi:softprob'
+        param = {
+        'max_depth': max_depth,  # the maximum depth of each tree
+        'eta': 0.3,  # the training step for each iteration
+        'silent': 1,  # logging mode - quiet
+        'objective': obj,  # error evaluation for multiclass training
+        'num_class': num_class}  # the number of classes that exist in this datset
     num_round = 20  # the number of training iterations
     dtrain = xgb.DMatrix(X_train, label=y_train)
     dtest = xgb.DMatrix(X_test, label=y_test)
     bst = xgb.train(param, dtrain, num_round)
     preds = bst.predict(dtest)
-    p = np.argmax(preds,axis=1)
+    if obj.startswith('multi'):
+        p = np.argmax(preds,axis=1)
+    else:
+        p = (preds > thresh).astype(int)
     return p
     
 
@@ -409,8 +457,8 @@ def mniback(sl):
         sl_mni.append(np.round(tmp2))
     return sl_mni
 
-def savesegtrk(sl, classassign, c, p, p_thresh,filename,mni):
-    tmp = np.where((classassign==c) & (p > p_thresh))
+def savesegtrk(sl, k, classassign, c, p, p_thresh,filename,mni):
+    tmp = np.where((classassign==c) & (p > p_thresh) & (k==0))
     t = tmp[0]
     sl_trk = [ sl[i] for i in t]
     if mni == 1:
