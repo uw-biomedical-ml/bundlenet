@@ -1,7 +1,7 @@
 """
 
 Functions for bundlenet: a convolutional neural network
-for segmentation of human brain connectomes
+for segmentation of tractography streamlines
 
 
 """
@@ -10,7 +10,6 @@ import numpy as np
 from skimage.transform import resize
 import scipy.ndimage.morphology as morph
 
-#from nibabel.streamlines import load as load_trk
 import dipy.tracking.utils as dtu
 
 from sklearn.metrics import cohen_kappa_score, jaccard_similarity_score,confusion_matrix
@@ -35,26 +34,19 @@ from dipy.tracking.streamline import Streamlines
 
 import xgboost as xgb
 
-def read_sl(fname):
-    
+def read_sl(fname):    
     """
     Reads streamlines from file.
     """
     streams, hdr = load_trk(fname)
     sl = Streamlines(streams)
-    #tgram = load_trk(fname)
-    #sl = list(dtu.move_streamlines(tgram.streamlines,
-                                   #np.eye(4), tgram.affine))
+    
     return sl
 
-def read_sl_mni(fname):
-    
+def read_sl_mni(fname):    
     """
-    Reads streamlines from file.
+    Reads streamlines from file in MNI space.
     """
-    #tgram = load_trk(fname)
-    #sl = list(dtu.move_streamlines(tgram.streamlines,
-                                   #np.eye(4), tgram.affine))
     streams, hdr = load_trk(fname)
     sl = Streamlines(streams)
     sl_mni=[]
@@ -68,12 +60,10 @@ def read_sl_mni(fname):
     return sl_mni
 
 
-def process_sl(streamlines_tract,take_n_sl,vol_shape,size,dil_iters):
-    
+def process_sl(streamlines_tract,take_n_sl,vol_shape,size,dil_iters): 
     """
     Takes dask bag of loaded bundles and returns sizexsize MIP image
-    """
-    
+    """  
     if take_n_sl == -1 or take_n_sl > len(streamlines_tract):
         take_n_sl = len(streamlines_tract)
     else:
@@ -99,12 +89,10 @@ def process_sl(streamlines_tract,take_n_sl,vol_shape,size,dil_iters):
         projected_all[sl_idx,:,:,:]=projected
     return projected_all
 
-def process_sl_onedirection(streamlines_tract,take_n_sl,vol_shape,size,dil_iters):
-    
+def process_sl_onedirection(streamlines_tract,take_n_sl,vol_shape,size,dil_iters): 
     """
     Takes dask bag of loaded bundles and returns sizexsize MIP image splitting by x,y,z
-    """
-    
+    """ 
     if take_n_sl == -1 or take_n_sl > len(streamlines_tract):
         take_n_sl = len(streamlines_tract)
     else:
@@ -132,16 +120,6 @@ def process_sl_onedirection(streamlines_tract,take_n_sl,vol_shape,size,dil_iters
         projected_all_1[sl_idx,:,:,:]=p1_dil
         projected_all_2[sl_idx,:,:,:]=p2_dil
     return(projected_all_0, projected_all_1, projected_all_2)
-
-def process_slandpredict(streamlines_tract,take_n_sl,vol_shape,size,dil_iters,model):
-    
-    """
-    Takes dask bag of loaded bundles and returns sizexsize MIP image
-    """
-    projected_all = process_slandpredict(streamlines_tract,take_n_sl,vol_shape,size,dil_iters)
-    p_sl = model.predict(projected_all, batch_size=5)
-    return p_sl
-    
 
 def partition_testtrain(test_perc, val_perc, streamlines_processed):
     
@@ -195,6 +173,9 @@ def partition_testtrain_onedirection(test_perc, val_perc, streamlines_processed,
     return (data_train, data_test, data_val, labels_train, labels_test, labels_val)
 
 def buildmodel_specify(input_shape, num_classes, dropout_factor, num_convlayers, num_fulllayers):
+    """
+    Constructs a CNN given specified parameters (num_classes,dropout_factor, num_convlayers, num_fulllayers)
+    """
     model = Sequential()
     model.add(Conv2D(32, kernel_size=(3, 3),activation='relu',input_shape=input_shape,padding='same'))
     model.add(MaxPooling2D((2, 2),padding='same'))
@@ -226,31 +207,10 @@ def buildmodel_specify(input_shape, num_classes, dropout_factor, num_convlayers,
               metrics=['accuracy'])
     return model
 
-def buildmodel(input_shape, num_classes):
-    model = Sequential()
-    model.add(Conv2D(32, kernel_size=(3, 3),activation='linear',input_shape=input_shape,padding='same'))
-    model.add(LeakyReLU(alpha=0.1))
-    model.add(MaxPooling2D((2, 2),padding='same'))
-    model.add(Dropout(0.25))
-    model.add(Conv2D(64, (3, 3), activation='linear',padding='same'))
-    model.add(LeakyReLU(alpha=0.1))
-    model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
-    model.add(Dropout(0.25))
-    model.add(Conv2D(128, (3, 3), activation='linear',padding='same'))
-    model.add(LeakyReLU(alpha=0.1))                  
-    model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
-    model.add(Dropout(0.25))
-    model.add(Flatten())
-    model.add(Dense(128, activation='linear'))
-    model.add(Dropout(0.25))
-    model.add(LeakyReLU(alpha=0.1))                  
-    model.add(Dense(num_classes, activation='softmax'))
-    model.compile(loss=keras.losses.categorical_crossentropy,
-              optimizer=keras.optimizers.Adam(),
-              metrics=['accuracy'])
-    return model
-
 def getlabeledstreamlines(map_files):
+    """
+    Returns the streamlines with a label from a list of trk files
+    """
     labeled_index = []
     labels = []
     for m_idx, m in enumerate(map_files):
@@ -260,6 +220,9 @@ def getlabeledstreamlines(map_files):
     return(labeled_index, labels) 
     
 def getunlabeledstreamlines(n_sl, labeled_index, n_unlabeled, randomize_sl):
+    """
+    Returns the streamlines without a label given a list with labels
+    """
     ind = range(n_sl)
     ind = np.delete(ind,labeled_index)
     if randomize_sl == 1:
@@ -268,12 +231,14 @@ def getunlabeledstreamlines(n_sl, labeled_index, n_unlabeled, randomize_sl):
     return(unlabeled_index)
 
 def combinestreamlines(labeled_index, unlabeled_index, labels, streamlines):
+    """
+    Combines lists of streamlines
+    """
     labels_selected = np.append(labels,(np.max(labels)+1)*np.ones([len(unlabeled_index),1]))
     streamlines_selected = [streamlines[i] for i in np.int_(np.append(labeled_index, unlabeled_index))]
     return(labels_selected, streamlines_selected)
 
-def getdatafrombag(streamlines_processed):
-    
+def getdatafrombag(streamlines_processed):   
     """
     Makes an nd.array of all streamlines from dask bag, used when not partitioning
     """
@@ -284,12 +249,10 @@ def getdatafrombag(streamlines_processed):
         all_labels = np.concatenate((all_labels,i*np.ones((streamlines_processed[i].shape[0]))))
     return (all_streamlines,all_labels)
 
-def plot_accuracy(training):
-    
+def plot_accuracy(training):  
     """
     Plots accuracy stats.
-    """
-    
+    """  
     accuracy = training.history['acc']
     val_accuracy = training.history['val_acc']
     epochs = range(len(accuracy))
@@ -302,12 +265,10 @@ def plot_accuracy(training):
     plt.legend()
     return fig
 
-def plot_loss(training):
-    
+def plot_loss(training):   
     """
-    Plots accuracy stats.
+    Plots loss stats.
     """
-    
     loss = training.history['loss']
     val_loss = training.history['val_loss']
     epochs = range(len(loss))
@@ -320,24 +281,20 @@ def plot_loss(training):
     plt.legend()
     return fig
 
-def print_accuarcystats(p_idx,labels_actual_idx):
-    
+def print_accuarcystats(p_idx,labels_actual_idx):    
     """
     Prints accuracy stats.
-    """
-    
+    """ 
     print("Percent correct is %s " % np.mean(p_idx == labels_actual_idx))
     kappa = cohen_kappa_score(p_idx, labels_actual_idx)
     print("Kappa is: %s" % kappa)
     jaccard = jaccard_similarity_score(p_idx, labels_actual_idx)
     print("Jaccard is: %s" % jaccard)
 
-def plotconfusionmat(bundle_names,p_idx,labels_actual_idx):
-    
+def plotconfusionmat(bundle_names,p_idx,labels_actual_idx):    
     """
-    Calculated and plots confusion matrix.
-    """
-    
+    Calculates and plots confusion matrix.
+    """  
     labels = np.array(range(min(p_idx),max(p_idx)+1))
     confusion_mat = confusion_matrix(labels_actual_idx,p_idx, labels)
     arr_bundle_names = np.array(bundle_names)
@@ -349,7 +306,9 @@ def plotconfusionmat(bundle_names,p_idx,labels_actual_idx):
     fig.set_size_inches([10, 8])
     
 def run_xgboost(X_train,y_train,X_test,y_test,max_depth,num_class,thresh):
-
+    """
+    Runs XGBoost on test and train data
+    """  
     if num_class < 3:
         obj = 'binary:logistic'
         param = {
@@ -380,26 +339,10 @@ def run_xgboost(X_train,y_train,X_test,y_test,max_depth,num_class,thresh):
     
 
 def trainmodel(data_train, labels_train, labels_train_o, data_val, labels_val, data_test, labels_test, input_shape, num_classes, batch_size, epochs, data_aug, num_samples): 
-    
-    model = Sequential()
-    model.add(Conv2D(32, kernel_size=(3, 3),activation='linear',input_shape=input_shape,padding='same'))
-    model.add(LeakyReLU(alpha=0.1))
-    model.add(MaxPooling2D((2, 2),padding='same'))
-    model.add(Dropout(0.25))
-    model.add(Conv2D(64, (3, 3), activation='linear',padding='same'))
-    model.add(LeakyReLU(alpha=0.1))
-    model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
-    model.add(Dropout(0.25))
-    model.add(Conv2D(128, (3, 3), activation='linear',padding='same'))
-    model.add(LeakyReLU(alpha=0.1))                  
-    model.add(MaxPooling2D(pool_size=(2, 2),padding='same'))
-    model.add(Dropout(0.25))
-    model.add(Flatten())
-    model.add(Dense(128, activation='linear'))
-    model.add(Dropout(0.25))
-    model.add(LeakyReLU(alpha=0.1))                  
-    model.add(Dense(num_classes, activation='softmax'))
-    
+    """
+    Train CNN with the option of data augmentation (out of date)
+    """ 
+    model = buildmodel_specify(input_shape, num_classes, dropout_factor, num_convlayers, num_fulllayers)
     model.compile(loss=keras.losses.categorical_crossentropy,
               optimizer=keras.optimizers.Adam(),
               metrics=['accuracy'])
@@ -413,13 +356,10 @@ def trainmodel(data_train, labels_train, labels_train_o, data_val, labels_val, d
                      epochs=epochs,
                      verbose=1,
                      validation_data=(data_val, labels_val))#,
-                     #class_weight=class_weights)
-    
+                     #class_weight=class_weights) 
         fig = plot_accuracy(training)
     else:
-        
         #need to shuffle streamlines and labels
-        
         s = np.arange(len(labels_train))
         np.random.shuffle(s)
         data_train_shuff = data_train[s,:,:,:]
@@ -446,7 +386,9 @@ def trainmodel(data_train, labels_train, labels_train_o, data_val, labels_val, d
     return model
 
 def mniback(sl):
-    
+    """
+    Transform from MNI space back 
+    """ 
     sl_mni=[]
     for i in range(len(sl)):
         tmp = sl[i]
@@ -458,6 +400,9 @@ def mniback(sl):
     return sl_mni
 
 def savesegtrk(sl, k, classassign, c, p, p_thresh,filename,mni):
+    """
+    Save .trk files given streamlines to keep(k) and most probable bundle(classassign) and associated probability(p)
+    """ 
     tmp = np.where((classassign==c) & (p > p_thresh) & (k==0))
     t = tmp[0]
     sl_trk = [ sl[i] for i in t]
